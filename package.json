@@ -1,0 +1,12 @@
+{
+  "name": "afgtopup-integration",
+  "version": "1.0.0",
+  "description": "AFGTopup API integration starter kit",
+  "main": "afgtopup-client.js",
+  "scripts": {
+    "test": "node example.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0"
+  }
+}
