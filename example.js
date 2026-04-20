@@ -21,7 +21,7 @@ const {
 // -----------------------------------------------------------------------------
 async function runExample() {
 
-  const customerPhone = '+93700600153'; // customer's phone number
+  const customerPhone = '+93700123456'; // customer's phone number
   const country       = 'AF';           // two-letter country code
   const topupAmount   = 100;            // amount in local currency (100 AFN)
   const myOrderId     = 'order_' + Date.now(); // your internal order ID
