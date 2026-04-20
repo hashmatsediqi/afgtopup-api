@@ -1,5 +1,4 @@
 # AFGTopup — API Integration Starter Kit
-
 Plug-and-play Node.js integration for the AFGTopup mobile top-up API.
 Send airtime top-ups to Afghanistan, Pakistan, Algeria, Morocco, Nigeria, and Kenya.
 
@@ -32,7 +31,6 @@ Open `.env` and replace `your_api_key_here` with the key provided by your accoun
 ```bash
 node example.js
 ```
-
 If everything is working you will see all 4 steps complete successfully.
 
 ---
@@ -57,7 +55,7 @@ const operators = await getOperators('AF');
 
 ### Step 2 — Detect operator from phone number
 ```javascript
-const detected = await detectOperator('+93700600153', 'AF');
+const detected = await detectOperator('+93700123456', 'AF');
 // Returns { operator_id, operator_name, ... }
 // Falls back to 422 if detection fails — show manual dropdown instead
 ```
@@ -72,7 +70,7 @@ const pricing = await getPrice('AF', operatorId, 100);
 ### Step 4 — Send top-up (after customer pays you)
 ```javascript
 const result = await sendTopup({
-  phone:      '+93700600153',
+  phone:      '+93700123456',
   amount:     100,
   country:    'AF',
   operatorId: 1,
@@ -88,12 +86,12 @@ const result = await sendTopup({
 
 | Code | Country | Currency | Min Amount |
 |------|---------|----------|------------|
-| AF | Afghanistan | AFN | 10 AFN |
-| PK | Pakistan | PKR | 50 PKR |
-| DZ | Algeria | DZD | 50 DZD |
-| MA | Morocco | MAD | 5 MAD |
-| NG | Nigeria | NGN | 100 NGN |
-| KE | Kenya | KES | 10 KES |
+| AF | 🇦🇫 Afghanistan | AFN | 10 AFN |
+| PK | 🇵🇰 Pakistan | PKR | 50 PKR |
+| DZ | 🇩🇿 Algeria | DZD | 50 DZD |
+| MA | 🇲🇦 Morocco | MAD | 5 MAD |
+| NG | 🇳🇬 Nigeria | NGN | 100 NGN |
+| KE | 🇰🇪 Kenya | KES | 10 KES |
 
 ---
 
@@ -138,7 +136,6 @@ EUR cost deducted from your prepaid balance
 
 ## Account & Support
 
-Contact your account manager to:
-- Top up your prepaid EUR balance
-- Rotate your API key if compromised
-- Request increased transaction limits
+Contact us to top up your balance, rotate your API key, or request higher limits.
+
+**Email:** support@afgtopup.com
