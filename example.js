@@ -1,11 +1,22 @@
 // =============================================================================
-// AFGTopup — Complete Integration Example
+// AFGTopup — Complete Partner API Integration Example
 // =============================================================================
-// This file demonstrates the full top-up flow from start to finish.
-// Copy and adapt this into your own order processing logic.
+// This file demonstrates the full mobile top-up flow from start to finish.
 //
-// Run this file directly to test your API key:
+// Flow:
+//   1. List operators
+//   2. Auto-detect operator
+//   3. Get real-time EUR price
+//   4. Send top-up
+//
+// Run directly:
 //   node example.js
+//
+// IMPORTANT:
+//   - Keep your API key server-side only.
+//   - Never expose it in frontend/browser/mobile code.
+//   - Use a unique external_id for every NEW top-up.
+//   - If retrying the SAME order, reuse the SAME external_id.
 // =============================================================================
 
 const {
@@ -15,117 +26,414 @@ const {
   sendTopup
 } = require('./afgtopup-client');
 
+
 // -----------------------------------------------------------------------------
-// EXAMPLE: Full top-up flow
-// In your real app, these values come from your customer's input + your order ID
+// EXAMPLE CONFIG
+// In a real application these values come from your customer/order system.
 // -----------------------------------------------------------------------------
+
 async function runExample() {
 
-  const customerPhone = '+93700123456'; // customer's phone number
-  const country       = 'AF';           // two-letter country code
-  const topupAmount   = 100;            // amount in local currency (100 AFN)
-  const myOrderId     = 'order_' + Date.now(); // your internal order ID
+  const customerPhone = '+93700123456';
+  const country       = 'AF';
+  const topupAmount   = 100;
 
-  console.log('=== AFGTopup Integration Test ===\n');
+  // IMPORTANT:
+  // Generate this ONCE when your own order is created and store it.
+  //
+  // Do NOT generate a new external ID every time you retry the same order.
+  const myOrderId = `order_${Date.now()}`;
 
-  // ---------------------------------------------------------------------------
-  // STEP 1: List available operators for this country
-  // Use this to populate a dropdown if the customer wants to select manually
-  // ---------------------------------------------------------------------------
-  console.log('STEP 1: Fetching operators for', country);
+  console.log('======================================');
+  console.log('      AFGTopup Integration Test');
+  console.log('======================================\n');
+
+
+  // ===========================================================================
+  // STEP 1: List Operators
+  // ===========================================================================
+  //
+  // Use this endpoint when you want to display the available networks
+  // for the selected country.
+  //
+  // ===========================================================================
+
+  console.log(`STEP 1: Fetching operators for ${country}...`);
+
+  let operators;
+
   try {
-    const operators = await getOperators(country);
+    operators = await getOperators(country);
+
     console.log('✅ Operators available:');
+
     operators.forEach(op => {
-      console.log(`   [${op.operator_id}] ${op.name} (${op.currency_code})`);
+      console.log(
+        `   [${op.operator_id}] ${op.name} (${op.currency_code || ''})`
+      );
     });
+
   } catch (err) {
     console.error('❌ Failed to get operators:', err.message);
+
+    if (err.details) {
+      console.error('   Details:', err.details);
+    }
+
     return;
   }
 
   console.log('');
 
-  // ---------------------------------------------------------------------------
-  // STEP 2: Auto-detect the operator from the phone number
-  // This is the preferred method — no need for customer to select manually
-  // ---------------------------------------------------------------------------
-  console.log('STEP 2: Detecting operator for', customerPhone);
+
+  // ===========================================================================
+  // STEP 2: Detect Operator
+  // ===========================================================================
+  //
+  // Recommended:
+  // Automatically detect the operator from the customer's phone number.
+  //
+  // If detection fails with HTTP 422, allow the customer to choose manually.
+  //
+  // ===========================================================================
+
+  console.log(`STEP 2: Detecting operator for ${customerPhone}...`);
+
   let operatorId;
+
   try {
+
     const detected = await detectOperator(customerPhone, country);
+
     operatorId = detected.operator_id;
-    console.log(`✅ Detected: ${detected.operator_name} (ID: ${operatorId})`);
+
+    console.log(
+      `✅ Detected: ${detected.operator_name} (ID: ${operatorId})`
+    );
+
   } catch (err) {
+
     if (err.status === 422) {
-      // Detection failed — fall back to manual selection
-      console.warn('⚠️  Could not auto-detect. Ask customer to select network manually.');
-      operatorId = 1; // fallback example — in real code, get this from customer input
+
+      console.warn(
+        '⚠️ Could not auto-detect the network.'
+      );
+
+      console.warn(
+        '   In production, ask the customer to select their operator manually.'
+      );
+
+      // DEMO ONLY.
+      // Never assume operator ID 1 in production.
+      if (operators.length === 0) {
+        console.error('❌ No operators available.');
+        return;
+      }
+
+      operatorId = operators[0].operator_id;
+
+      console.warn(
+        `   Demo fallback selected: ${operators[0].name} (ID: ${operatorId})`
+      );
+
     } else {
+
       console.error('❌ Detection error:', err.message);
+
+      if (err.details) {
+        console.error('   Details:', err.details);
+      }
+
       return;
     }
   }
 
   console.log('');
 
-  // ---------------------------------------------------------------------------
-  // STEP 3: Get the EUR price before charging the customer
-  // Show this to your customer BEFORE they pay
-  // ---------------------------------------------------------------------------
-  console.log(`STEP 3: Getting price for ${topupAmount} AFN`);
-  let eurCost;
-  try {
-    const pricing = await getPrice(country, operatorId, topupAmount);
-    eurCost = pricing.eur_cost;
-    console.log(`✅ Price: ${topupAmount} ${pricing.currency} = €${eurCost} EUR`);
-    console.log(`   (Your max per transaction: €${pricing.max_eur})`);
 
-    // In your real app: show this price to customer, collect their payment,
-    // then proceed to Step 4 only after payment is confirmed
-    console.log('   → In your app: show this price to customer, wait for payment');
+  // ===========================================================================
+  // STEP 3: Get Real-Time Price
+  // ===========================================================================
+  //
+  // Always get the latest price before sending the top-up.
+  //
+  // eur_cost = the exact amount AFGTopup will deduct from your prepaid
+  // partner balance if the top-up is submitted at that price.
+  //
+  // Pricing is returned in EUR to 2 decimal places.
+  //
+  // ===========================================================================
+
+  console.log(
+    `STEP 3: Getting price for ${topupAmount} local currency units...`
+  );
+
+  let eurCost;
+
+  try {
+
+    const pricing = await getPrice(
+      country,
+      operatorId,
+      topupAmount
+    );
+
+    eurCost = pricing.eur_cost;
+
+    console.log(
+      `✅ AFGTopup cost: ${topupAmount} ${pricing.currency} = €${eurCost}`
+    );
+
+    console.log(
+      `   Operator: ${pricing.operator_name || operatorId}`
+    );
+
+    console.log(
+      `   Maximum transaction value: €${pricing.max_eur}`
+    );
+
+    console.log(
+      '   → In production, complete your own customer/order flow before Step 4.'
+    );
+
   } catch (err) {
+
     console.error('❌ Pricing error:', err.message);
+
+    if (err.details) {
+      console.error('   Details:', err.details);
+    }
+
     return;
   }
 
   console.log('');
 
-  // ---------------------------------------------------------------------------
-  // STEP 4: Send the top-up (only after customer has paid YOU)
-  // ---------------------------------------------------------------------------
+
+  // ===========================================================================
+  // STEP 4: Send Top-Up
+  // ===========================================================================
+  //
+  // Only submit the top-up once your own order is ready.
+  //
+  // The request returns status "processing".
+  // Delivery is handled asynchronously.
+  //
+  // ===========================================================================
+
   console.log('STEP 4: Sending top-up...');
+
   try {
+
     const result = await sendTopup({
       phone:      customerPhone,
       amount:     topupAmount,
-      country:    country,
-      operatorId: operatorId,
-      externalId: myOrderId,    // your order ID — prevents duplicate top-ups
-      email:      null          // optional: 'customer@email.com' for confirmation
+      country,
+      operatorId,
+
+      // REQUIRED:
+      // Your own unique order/reference ID.
+      externalId: myOrderId,
+
+      // Optional customer email
+      email: null
     });
 
-    console.log('✅ Top-up queued successfully!');
-    console.log(`   Transaction ID:  ${result.transaction_id}`);
-    console.log(`   EUR charged:     €${result.eur_charged}`);
-    console.log(`   Balance after:   €${result.balance_after}`);
-    console.log(`   Status:          ${result.status}`);
-    console.log('   Credit will arrive on the phone within ~60 seconds.');
+
+    console.log('✅ Top-up accepted successfully!');
+
+    console.log(
+      `   Transaction ID: ${result.transaction_id}`
+    );
+
+    console.log(
+      `   External ID:    ${result.external_id}`
+    );
+
+    console.log(
+      `   EUR charged:    €${result.eur_charged}`
+    );
+
+    console.log(
+      `   Balance after:  €${result.balance_after}`
+    );
+
+    console.log(
+      `   Status:         ${result.status}`
+    );
+
+
+    // If this was a safe replay of a previous completed request
+    if (result._replayed === true) {
+      console.log(
+        '   ℹ️ This was a replay of an existing external_id — no duplicate top-up was created.'
+      );
+    }
+
+
+    if (result.balance_warning) {
+      console.warn(
+        `   ⚠️ ${result.balance_warning}`
+      );
+    }
+
+
+    console.log('');
+    console.log(
+      'The transaction has been accepted and is being processed.'
+    );
+
 
   } catch (err) {
-    // Handle specific error codes
-    if (err.status === 402) {
-      console.error('❌ Insufficient balance. Top up your AFGTopup account.');
-      console.error(`   Balance: €${err.details.balance_eur} | Required: €${err.details.required_eur}`);
-    } else if (err.status === 401) {
-      console.error('❌ Invalid API key. Check your AFGTOPUP_API_KEY in .env');
+
+    console.error('');
+
+
+    // -------------------------------------------------------------------------
+    // 401 — API key problem
+    // -------------------------------------------------------------------------
+
+    if (err.status === 401) {
+
+      console.error(
+        '❌ Invalid API key.'
+      );
+
+      console.error(
+        '   Check AFGTOPUP_API_KEY in your .env file.'
+      );
+
+
+    // -------------------------------------------------------------------------
+    // 402 — Prepaid balance too low
+    // -------------------------------------------------------------------------
+
+    } else if (err.status === 402) {
+
+      console.error(
+        '❌ Insufficient AFGTopup partner balance.'
+      );
+
+      if (err.details) {
+
+        console.error(
+          `   Balance:  €${err.details.balance_eur}`
+        );
+
+        console.error(
+          `   Required: €${err.details.required_eur}`
+        );
+
+        if (err.details.action) {
+          console.error(
+            `   Action: ${err.details.action}`
+          );
+        }
+      }
+
+
+    // -------------------------------------------------------------------------
+    // 409 — Same external_id is already being processed / reconciliation
+    // -------------------------------------------------------------------------
+
+    } else if (err.status === 409) {
+
+      console.error(
+        '⚠️ This external_id is already being processed or held for review.'
+      );
+
+      console.error(
+        '   Do NOT create a new external_id for the same customer order.'
+      );
+
+      if (err.details?.action) {
+        console.error(
+          `   Action: ${err.details.action}`
+        );
+      }
+
+      if (err.details?.transaction_id) {
+        console.error(
+          `   Transaction ID: ${err.details.transaction_id}`
+        );
+      }
+
+
+    // -------------------------------------------------------------------------
+    // 429 — Rate limit
+    // -------------------------------------------------------------------------
+
     } else if (err.status === 429) {
-      console.error('❌ Rate limit hit. Max 60 requests/minute. Slow down.');
+
+      console.error(
+        '❌ Rate limit reached. Maximum 300 API requests per minute per API key.'
+      );
+
+      console.error(
+        '   Retry with backoff.'
+      );
+
+      if (err.details?.retry_after_seconds) {
+        console.error(
+          `   Retry after: ${err.details.retry_after_seconds} seconds`
+        );
+      }
+
+
+    // -------------------------------------------------------------------------
+    // 503 — Temporary / uncertain server condition
+    // -------------------------------------------------------------------------
+
+    } else if (err.status === 503) {
+
+      console.error(
+        '⚠️ AFGTopup temporarily could not complete the request.'
+      );
+
+      if (err.details?.action) {
+        console.error(
+          `   Action: ${err.details.action}`
+        );
+      }
+
+      if (err.details?.transaction_id) {
+        console.error(
+          `   Transaction ID: ${err.details.transaction_id}`
+        );
+      }
+
+      console.error(
+        '   IMPORTANT: Follow the API action message. Never create a new external_id just because a request failed or timed out.'
+      );
+
+
+    // -------------------------------------------------------------------------
+    // Other error
+    // -------------------------------------------------------------------------
+
     } else {
-      console.error('❌ Top-up failed:', err.message, err.details || '');
+
+      console.error(
+        '❌ Top-up request failed:',
+        err.message
+      );
+
+      if (err.details) {
+        console.error(
+          '   Details:',
+          err.details
+        );
+      }
     }
   }
 }
 
-// Run the example
-runExample();
+
+// =============================================================================
+// RUN EXAMPLE
+// =============================================================================
+
+runExample().catch(err => {
+  console.error('Unexpected error:', err);
+  process.exitCode = 1;
+});
