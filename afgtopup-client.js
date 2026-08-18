@@ -1,58 +1,78 @@
 // =============================================================================
 // AFGTopup API Client
 // =============================================================================
-// This file handles all communication with the AFGTopup top-up API.
-// It covers all 4 endpoints: operators, detect, price, and send top-up.
+// This file handles communication with the AFGTopup Partner Top-Up API.
+//
+// Endpoints covered:
+//   1. List operators
+//   2. Detect operator
+//   3. Get real-time price
+//   4. Send top-up
 //
 // SETUP:
-//   1. npm install node-fetch dotenv
-//   2. Copy .env.example to .env and fill in your API key
-//   3. Import this client into your own code (see example.js)
+//   1. Use Node.js v18+
+//   2. Run: npm install dotenv
+//   3. Copy .env.example to .env
+//   4. Add your AFGTopup API key to .env
+//   5. Import this client into your server-side application
 //
-// REQUIREMENTS:
-//   - Node.js v18+ (has built-in fetch) OR install node-fetch for older versions
-//   - Your AFGTopup API key (provided by your account manager)
+// SECURITY:
+//   - Keep your API key private.
+//   - Never expose the API key in browser/frontend JavaScript.
+//   - Never include the API key in a public GitHub repository.
+//   - Store the API key as a server environment variable.
 // =============================================================================
 
 require('dotenv').config();
 
+
 // -----------------------------------------------------------------------------
 // CONFIG
-// Change BASE_URL if you are given a custom endpoint by your account manager.
 // -----------------------------------------------------------------------------
+
 const BASE_URL = 'https://afgtopup.com/.netlify/functions';
 const API_KEY  = process.env.AFGTOPUP_API_KEY;
 
 if (!API_KEY) {
   throw new Error(
     '[AFGTopup] Missing AFGTOPUP_API_KEY environment variable. ' +
-    'Copy .env.example to .env and add your key.'
+    'Copy .env.example to .env and add your API key.'
   );
 }
 
+
 // -----------------------------------------------------------------------------
-// HELPER: makes authenticated GET requests to the API
+// HELPER: authenticated GET request
 // -----------------------------------------------------------------------------
+
 async function apiGet(endpoint, params = {}) {
   const url = new URL(`${BASE_URL}/${endpoint}`);
 
-  // Append query parameters to the URL
   Object.entries(params).forEach(([key, value]) => {
-    url.searchParams.set(key, value);
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
   });
 
   const response = await fetch(url.toString(), {
     method: 'GET',
     headers: {
-      'X-API-Key': API_KEY   // ← your secret key goes here, never hardcode it
+      'X-API-Key': API_KEY
     }
   });
 
-  const data = await response.json();
+  let data;
 
-  // If the API returned an error, throw it so the caller can handle it
+  try {
+    data = await response.json();
+  } catch {
+    data = {
+      error: `Invalid response from AFGTopup API (HTTP ${response.status})`
+    };
+  }
+
   if (!response.ok) {
-    const error = new Error(data.error || 'API request failed');
+    const error = new Error(data.error || 'AFGTopup API request failed');
     error.status  = response.status;
     error.details = data;
     throw error;
@@ -61,23 +81,33 @@ async function apiGet(endpoint, params = {}) {
   return data;
 }
 
+
 // -----------------------------------------------------------------------------
-// HELPER: makes authenticated POST requests to the API
+// HELPER: authenticated POST request
 // -----------------------------------------------------------------------------
+
 async function apiPost(endpoint, body = {}) {
   const response = await fetch(`${BASE_URL}/${endpoint}`, {
     method: 'POST',
     headers: {
-      'X-API-Key':    API_KEY,        // ← your secret key
+      'X-API-Key': API_KEY,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body)
   });
 
-  const data = await response.json();
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = {
+      error: `Invalid response from AFGTopup API (HTTP ${response.status})`
+    };
+  }
 
   if (!response.ok) {
-    const error = new Error(data.error || 'API request failed');
+    const error = new Error(data.error || 'AFGTopup API request failed');
     error.status  = response.status;
     error.details = data;
     throw error;
@@ -86,120 +116,361 @@ async function apiPost(endpoint, body = {}) {
   return data;
 }
 
+
 // =============================================================================
 // ENDPOINT 1: List Operators
 // =============================================================================
-// Returns all supported mobile networks for a given country.
-// Call this to show a dropdown of networks to your customer.
 //
-// @param {string} country - Two-letter country code e.g. "AF", "PK", "NG"
-// @returns {Array}  List of operators with operator_id, name, currency_code
+// Returns supported mobile networks for a country.
+//
+// Use this when you want to show the available networks to your customer.
+//
+// @param {string} country
+// Two-letter ISO country code.
+//
+// Examples:
+//   "AF" = Afghanistan
+//   "PK" = Pakistan
+//   "DZ" = Algeria
+//   "MA" = Morocco
+//   "NG" = Nigeria
+//   "KE" = Kenya
+//
+// @returns {Array}
 //
 // Example response:
+//
 // [
-//   { operator_id: 1, name: "Afghan Wireless", country: "AF", currency_code: "AFN" },
-//   { operator_id: 4, name: "Roshan",          country: "AF", currency_code: "AFN" }
+//   {
+//     operator_id: 1,
+//     name: "Afghan Wireless Afghanistan",
+//     country: "AF",
+//     currency_code: "AFN"
+//   },
+//   {
+//     operator_id: 4,
+//     name: "Roshan Afghanistan",
+//     country: "AF",
+//     currency_code: "AFN"
+//   }
 // ]
+//
 // =============================================================================
+
 async function getOperators(country) {
-  return apiGet('partner-operators', { country });
+  if (!country) {
+    throw new Error('country is required');
+  }
+
+  return apiGet('partner-operators', {
+    country: country.toUpperCase()
+  });
 }
+
 
 // =============================================================================
 // ENDPOINT 2: Detect Operator
 // =============================================================================
-// Automatically detects the mobile network from a phone number.
-// Call this after your customer types their phone number — no manual selection needed.
 //
-// @param {string} phone   - Phone in international format e.g. "+93700600153"
-// @param {string} country - Two-letter country code e.g. "AF"
-// @returns {Object} Detected operator with operator_id and operator_name
+// Automatically detects the recipient's mobile network.
+//
+// Recommended flow:
+//   1. Customer enters phone number
+//   2. Call detectOperator()
+//   3. Use returned operator_id for getPrice() and sendTopup()
+//
+// @param {string} phone
+// International E.164 phone number.
+//
+// Example:
+//   "+93700600153"
+//
+// @param {string} country
+// Two-letter ISO country code.
+//
+// @returns {Object}
 //
 // Example response:
-// { phone: "+93700600153", operator_id: 1, operator_name: "Afghan Wireless", country: "AF" }
 //
-// NOTE: If detection fails (422 error), fall back to showing the operator dropdown
-//       and let the customer select manually.
+// {
+//   phone: "+93700600153",
+//   operator_id: 1,
+//   operator_name: "Afghan Wireless Afghanistan",
+//   country: "AF",
+//   currency_code: "AFN"
+// }
+//
+// NOTE:
+// If auto-detection returns HTTP 422, you can fall back to getOperators()
+// and allow the customer to select the network manually.
+//
 // =============================================================================
+
 async function detectOperator(phone, country) {
-  return apiGet('partner-detect', { phone, country });
+  if (!phone) {
+    throw new Error('phone is required');
+  }
+
+  if (!country) {
+    throw new Error('country is required');
+  }
+
+  return apiGet('partner-detect', {
+    phone,
+    country: country.toUpperCase()
+  });
 }
+
 
 // =============================================================================
 // ENDPOINT 3: Get Price
 // =============================================================================
-// Returns the EUR cost for a top-up before sending.
-// ALWAYS call this before sending — use it to show the price to your customer
-// and to verify the amount is within the €50 limit.
 //
-// @param {string} country     - Two-letter country code
-// @param {number} operatorId  - Operator ID from getOperators() or detectOperator()
-// @param {number} amount      - Top-up amount in local currency (e.g. 100 for 100 AFN)
-// @returns {Object} Pricing details including eur_cost
+// Returns the real-time EUR cost for a top-up.
+//
+// ALWAYS call this before sendTopup().
+//
+// The value returned in:
+//
+//     eur_cost
+//
+// is the exact EUR price that will be deducted from your prepaid partner
+// balance if the top-up is submitted at that price.
+//
+// Public EUR prices are returned to 2 decimal places.
+//
+// @param {string} country
+// Two-letter ISO country code.
+//
+// @param {number} operatorId
+// Operator ID returned by getOperators() or detectOperator().
+//
+// @param {number} amount
+// Top-up amount in the recipient country's local currency.
+//
+// Example:
+//   amount = 100 means 100 AFN for Afghanistan.
+//
+// @returns {Object}
 //
 // Example response:
-// { local_amount: 100, currency: "AFN", eur_cost: 2.0623, operator_id: 1, max_eur: 50 }
 //
-// TIP: eur_cost is what gets deducted from your balance.
-//      You can charge your customer more and keep the difference as your margin.
+// {
+//   local_amount: 100,
+//   currency: "AFN",
+//   eur_cost: 1.93,
+//   operator_id: 1,
+//   operator_name: "Afghan Wireless Afghanistan",
+//   country: "AF",
+//   max_eur: 50
+// }
+//
+// IMPORTANT:
+// The example above is illustrative.
+// Always use the live eur_cost returned by the API as the final price.
+//
 // =============================================================================
+
 async function getPrice(country, operatorId, amount) {
+  if (!country) {
+    throw new Error('country is required');
+  }
+
+  if (!operatorId) {
+    throw new Error('operatorId is required');
+  }
+
+  if (!amount || Number(amount) <= 0) {
+    throw new Error('amount must be greater than 0');
+  }
+
   return apiGet('partner-price', {
-    country,
+    country: country.toUpperCase(),
     operator_id: operatorId,
     amount
   });
 }
 
+
 // =============================================================================
 // ENDPOINT 4: Send Top-Up
 // =============================================================================
-// Sends the actual top-up to the recipient. This deducts EUR from your balance
-// and queues the delivery. Only call this AFTER your customer has paid you.
+//
+// Sends the actual top-up.
+//
+// This endpoint:
+//
+//   - verifies the API key
+//   - recalculates the current partner price
+//   - checks the prepaid balance
+//   - safely deducts the exact EUR amount
+//   - prevents duplicate orders
+//   - queues the top-up for processing
+//
+// Only call sendTopup() AFTER your own customer/order is ready to be processed.
+//
+// -----------------------------------------------------------------------------
+// PARAMETERS
+// -----------------------------------------------------------------------------
 //
 // @param {Object} options
-// @param {string} options.phone        - Recipient phone in international format "+93700600153"
-// @param {number} options.amount       - Top-up amount in local currency
-// @param {string} options.country      - Two-letter country code
-// @param {number} options.operatorId   - Operator ID
-// @param {string} options.externalId   - YOUR internal order ID (prevents duplicate top-ups on retry)
-// @param {string} [options.email]      - Optional: customer email for delivery confirmation
-// @returns {Object} Transaction result with transaction_id and balance_after
 //
-// Example response:
-// {
-//   success: true,
-//   transaction_id: "pt_a1b2c3d4_e5f6a7b8c9d0e1f2",
-//   status: "processing",
-//   eur_charged: 2.0623,
-//   balance_after: 47.9377
-// }
+// @param {string} options.phone
+// Recipient phone number in international E.164 format.
+//
+// Example:
+//   "+93700600153"
+//
+// @param {number} options.amount
+// Amount in local currency.
+//
+// Example:
+//   100 = 100 AFN
+//
+// @param {string} options.country
+// Two-letter ISO country code.
+//
+// Example:
+//   "AF"
+//
+// @param {number} options.operatorId
+// Operator ID from getOperators() or detectOperator().
+//
+// @param {string} options.externalId
+// REQUIRED.
+//
+// This must be YOUR unique order/reference ID.
+//
+// Example:
+//   "order_100001"
 //
 // IMPORTANT:
-//   - Response is 202 Accepted — delivery is async, credit arrives within ~60 seconds
-//   - Always pass externalId (your order ID) to prevent double top-ups on retry
-//   - Never call this from the browser — server-side only
+//   - Use a different externalId for every new top-up.
+//   - Never reuse an externalId for a different transaction.
+//   - If a network request is uncertain, retry using the SAME externalId.
+//   - Do NOT generate a new externalId just because a request timed out.
+//   - Duplicate protection is retained for 14 days.
+//
+// @param {string} [options.email]
+// Optional customer email.
+//
+// -----------------------------------------------------------------------------
+// EXAMPLE RESPONSE
+// -----------------------------------------------------------------------------
+//
+// {
+//   success: true,
+//   transaction_id: "pr_159e14b7-8dcf-45ba-b30b-451f2966f581",
+//   status: "processing",
+//   message: "Top-up queued successfully.",
+//   eur_charged: 1.93,
+//   balance_after: 48.07,
+//   external_id: "order_100001"
+// }
+//
+// NOTE:
+// Partner transaction references generated by AFGTopup begin with:
+//
+//     pr_
+//
+// -----------------------------------------------------------------------------
+// IDEMPOTENCY / SAFE RETRY
+// -----------------------------------------------------------------------------
+//
+// If you retry the SAME completed external_id, the API can return the original
+// transaction instead of creating another top-up.
+//
+// Example replay:
+//
+// {
+//   success: true,
+//   transaction_id: "pr_159e14b7-8dcf-45ba-b30b-451f2966f581",
+//   status: "processing",
+//   eur_charged: 1.93,
+//   balance_after: 48.07,
+//   external_id: "order_100001",
+//   _replayed: true
+// }
+//
+// Never send a second order using the same externalId.
+//
+// -----------------------------------------------------------------------------
+// IMPORTANT
+// -----------------------------------------------------------------------------
+//
+// - Top-up submission returns status "processing" because delivery is asynchronous.
+// - Do not expose this function directly to a browser/frontend.
+// - Keep the API key server-side.
+// - Maximum transaction value is currently €50 after partner pricing.
+// - Always obtain the current price before submitting.
+//
 // =============================================================================
-async function sendTopup({ phone, amount, country, operatorId, externalId, email }) {
 
-  // Validate required fields before even hitting the API
-  if (!phone)      throw new Error('phone is required');
-  if (!amount)     throw new Error('amount is required');
-  if (!country)    throw new Error('country is required');
-  if (!operatorId) throw new Error('operatorId is required');
-  if (!externalId) throw new Error('externalId is required — use your internal order ID');
+async function sendTopup({
+  phone,
+  amount,
+  country,
+  operatorId,
+  externalId,
+  email
+}) {
+
+  // ---------------------------------------------------------------------------
+  // Validate required parameters locally before calling the API
+  // ---------------------------------------------------------------------------
+
+  if (!phone) {
+    throw new Error('phone is required');
+  }
+
+  if (!/^\+[1-9]\d{6,14}$/.test(phone)) {
+    throw new Error(
+      'phone must be in international E.164 format, e.g. +93700600153'
+    );
+  }
+
+  if (!amount || Number(amount) <= 0) {
+    throw new Error('amount must be greater than 0');
+  }
+
+  if (!country) {
+    throw new Error('country is required');
+  }
+
+  if (!operatorId) {
+    throw new Error('operatorId is required');
+  }
+
+  if (!externalId || typeof externalId !== 'string') {
+    throw new Error(
+      'externalId is required — use your unique internal order ID'
+    );
+  }
+
+  if (externalId.length > 128) {
+    throw new Error('externalId must be 128 characters or fewer');
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // Submit top-up
+  // ---------------------------------------------------------------------------
 
   return apiPost('partner-topup', {
     phone,
-    amount,
-    country,
-    operator_id:    operatorId,
-    external_id:    externalId,   // your order ID — prevents duplicate top-ups
-    customer_email: email || null // optional — sends delivery confirmation to customer
+    amount: Number(amount),
+    country: country.toUpperCase(),
+    operator_id: Number(operatorId),
+    external_id: externalId,
+    customer_email: email || null
   });
 }
 
-// Export all functions for use in your own code
+
+// =============================================================================
+// EXPORTS
+// =============================================================================
+
 module.exports = {
   getOperators,
   detectOperator,
