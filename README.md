@@ -57,6 +57,8 @@ Do not put your real API key directly inside JavaScript code.
 
 Do not commit your `.env` file to GitHub.
 
+AFGTopup may rotate your credential before LIVE activation. When that happens, replace only the server-side environment variable; the API integration code and endpoint URLs stay the same.
+
 ---
 
 ## 3. Test the integration
@@ -159,7 +161,9 @@ LIVE
 
 AFGTopup controls the environment on your Partner account.
 
-You use the **same API base URL, endpoint paths, API key and request format** in both environments. You do not need to change your integration code when AFGTopup moves your account from SANDBOX to LIVE.
+You use the **same API base URL, endpoint paths and request format** in both environments. You do not need to change your integration code when moving from SANDBOX to LIVE.
+
+For security, AFGTopup issues or rotates the Partner API credential before LIVE activation. Update only the server-side `AFGTOPUP_API_KEY` environment variable with the new credential provided privately by AFGTopup.
 
 Check your current environment in the Partner Portal:
 
@@ -196,7 +200,7 @@ Example sandbox response:
   sandbox: true,
   environment: "sandbox",
   simulated: true,
-  transaction_id: "pr_sbx_5c76fe2d-ea35-4351-b2d7-4a73dde6c603",
+  transaction_id: "pr_sbx_example_123",
   status: "success",
   message: "Sandbox top-up simulated successfully. No real mobile credit was sent and no balance was deducted.",
   eur_charged: 1.93,
@@ -214,9 +218,11 @@ A successful sandbox simulation normally returns HTTP `200`.
 
 When your integration is ready, contact AFGTopup.
 
-AFGTopup switches the Partner account from **SANDBOX** to **LIVE**.
+Before LIVE activation, AFGTopup issues or rotates your private Partner API credential. Store the new credential only in your backend environment variable and remove the previous sandbox/test credential from your systems where it is no longer needed.
 
-Before sending a real top-up, confirm the Partner Portal shows the green:
+AFGTopup then switches the Partner account from **SANDBOX** to **LIVE**.
+
+Before sending a real top-up, confirm that your backend is using the newly issued LIVE credential and that the Partner Portal shows the green:
 
 ```text
 LIVE
@@ -236,7 +242,7 @@ Example live response:
   success: true,
   sandbox: false,
   environment: "live",
-  transaction_id: "pr_159e14b7-8dcf-45ba-b30b-451f2966f581",
+  transaction_id: "pr_example_123",
   status: "processing",
   message: "Top-up queued successfully.",
   eur_charged: 1.93,
@@ -259,6 +265,10 @@ Test operator detection + pricing + top-up submission
 Confirm sandbox response
         ↓
 Ask AFGTopup to enable LIVE
+        ↓
+Receive/rotate LIVE API credential
+        ↓
+Update backend environment variable
         ↓
 Confirm LIVE badge in Partner Portal
         ↓
@@ -423,7 +433,7 @@ Sandbox example:
   sandbox: true,
   environment: "sandbox",
   simulated: true,
-  transaction_id: "pr_sbx_5c76fe2d-ea35-4351-b2d7-4a73dde6c603",
+  transaction_id: "pr_sbx_example_123",
   status: "success",
   eur_charged: 1.93,
   balance_after: 10.00,
@@ -441,7 +451,7 @@ Live example:
   success: true,
   sandbox: false,
   environment: "live",
-  transaction_id: "pr_159e14b7-8dcf-45ba-b30b-451f2966f581",
+  transaction_id: "pr_example_123",
   status: "processing",
   message: "Top-up queued successfully.",
   eur_charged: 1.93,
@@ -465,7 +475,7 @@ pr_sbx_
 Live example:
 
 ```text
-pr_159e14b7-8dcf-45ba-b30b-451f2966f581
+pr_example_123
 ```
 
 Store the returned `transaction_id` with your own order records.
@@ -535,7 +545,7 @@ Example:
 ```javascript
 {
   success: true,
-  transaction_id: "pr_159e14b7-8dcf-45ba-b30b-451f2966f581",
+  transaction_id: "pr_example_123",
   status: "processing",
   eur_charged: 1.93,
   balance_after: 48.07,
@@ -809,7 +819,7 @@ const API_KEY = process.env.AFGTOPUP_API_KEY;
 Never hardcode a real key such as:
 
 ```javascript
-const API_KEY = 'sk_live_REAL_KEY';
+const API_KEY = 'your_private_api_key_here';
 ```
 
 ---
@@ -853,16 +863,17 @@ This makes support, retries, and reconciliation easier.
 
 1. Keep the API key backend-only.
 2. Integrate and test in SANDBOX before requesting LIVE access.
-3. Confirm the Partner Portal shows `LIVE` before intentionally sending a real top-up.
-4. Always call the price endpoint before sending.
-5. Use a unique `external_id` for every new top-up.
-6. Store the external ID before sending the request.
-7. Retry the same order using the same external ID.
-8. Store the returned AFGTopup `transaction_id`.
-9. Never assume a timeout means the transaction was not accepted.
-10. Do not hardcode prices.
-11. Handle insufficient balance and rate-limit errors.
-12. Keep your prepaid balance funded for LIVE usage.
+3. Replace the sandbox/test credential with the fresh credential provided by AFGTopup before LIVE use.
+4. Confirm the Partner Portal shows `LIVE` before intentionally sending a real top-up.
+5. Always call the price endpoint before sending.
+6. Use a unique `external_id` for every new top-up.
+7. Store the external ID before sending the request.
+8. Retry the same order using the same external ID.
+9. Store the returned AFGTopup `transaction_id`.
+10. Never assume a timeout means the transaction was not accepted.
+11. Do not hardcode prices.
+12. Handle insufficient balance and rate-limit errors.
+13. Keep your prepaid balance funded for LIVE usage.
 
 ---
 
@@ -897,7 +908,7 @@ Contact AFGTopup for:
 - Prepaid balance top-ups
 - API account questions
 - API key rotation
-- Sandbox / Live environment activation
+- Sandbox / Live environment activation and credential rotation
 - Technical integration assistance
 - Transaction investigation
 - Higher limits when approved
@@ -921,6 +932,9 @@ Before production use:
 - [ ] `detectOperator()` tested
 - [ ] `getPrice()` tested
 - [ ] Sandbox top-up tested and response confirms `sandbox: true`
+- [ ] Fresh LIVE API credential received privately from AFGTopup
+- [ ] Backend environment variable updated with the fresh LIVE credential
+- [ ] Previous sandbox/test credential removed where no longer needed
 - [ ] AFGTopup has enabled LIVE access
 - [ ] Partner Portal shows the green `LIVE` badge
 - [ ] One small controlled real top-up tested
