@@ -1,5 +1,8 @@
 # AFGTopup — API Integration Starter Kit
 
+
+Node.js is provided as a reference implementation; the AFGTopup Partner API can be integrated from any backend technology capable of making HTTPS requests and handling JSON. Regardless of language, the same rules apply: keep the API key server-side only, use HTTPS, and generate a unique `external_id` per order.
+
 Plug-and-play Node.js integration for the AFGTopup Partner API.
 
 Send mobile airtime top-ups to supported countries using a secure prepaid API account.
@@ -116,7 +119,8 @@ Send top-up
         ↓
 Receive AFGTopup transaction_id
         ↓
-Initial status = processing
+LIVE: initial status = processing
+SANDBOX: simulated status = success
 ```
 
 ---
@@ -388,19 +392,13 @@ Example response:
 }
 ```
 
-`eur_cost` is the EUR amount that will be deducted from your prepaid AFGTopup partner balance.
+`eur_cost` is the EUR partner price. In LIVE mode, this is the amount deducted from your prepaid AFGTopup partner balance. In SANDBOX mode, it is calculated for testing but is not deducted.
 
 EUR prices and balance values are returned to 2 decimal places.
 
 Example prices shown in this documentation are illustrative only.
 
-Always use the live:
-
-```text
-eur_cost
-```
-
-returned by the API.
+Always use the current `eur_cost` returned by the API.
 
 Do not hardcode example prices into your application.
 
