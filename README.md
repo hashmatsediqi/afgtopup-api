@@ -50,7 +50,7 @@ cp .env.example .env
 Open `.env` and add the API key provided by AFGTopup:
 
 ```env
-AFGTOPUP_API_KEY=sk_live_your_private_key_here
+AFGTOPUP_API_KEY=your_private_api_key_here
 ```
 
 Do not put your real API key directly inside JavaScript code.
@@ -67,7 +67,7 @@ Before running the example, open:
 example.js
 ```
 
-and replace the example phone number with a phone number you are authorized to top up.
+and replace the example phone number with a phone number you are authorized to use for testing.
 
 Then run:
 
@@ -81,11 +81,21 @@ or:
 npm test
 ```
 
-Important: `example.js` performs a real top-up in Step 4 and can deduct funds from your prepaid AFGTopup balance.
+Before Step 4, check your Partner Portal:
+
+```text
+https://afgtopup.com/partners/
+```
+
+If the portal shows **SANDBOX**, the top-up is simulated: no real mobile credit is sent and no prepaid balance is deducted.
+
+If the portal shows **LIVE**, Step 4 is a real top-up and can deduct funds from your prepaid AFGTopup balance.
 
 ---
 
 # Integration Flow
+
+Build and test this flow in **SANDBOX** first. After AFGTopup enables **LIVE**, the same integration is used for real top-ups.
 
 The recommended integration flow is:
 
@@ -135,6 +145,127 @@ X-API-Key: your_private_api_key
 ```
 
 The included `afgtopup-client.js` handles this automatically.
+
+---
+
+# Sandbox and Live Environments
+
+AFGTopup supports two Partner API environments:
+
+```text
+SANDBOX
+LIVE
+```
+
+AFGTopup controls the environment on your Partner account.
+
+You use the **same API base URL, endpoint paths, API key and request format** in both environments. You do not need to change your integration code when AFGTopup moves your account from SANDBOX to LIVE.
+
+Check your current environment in the Partner Portal:
+
+```text
+https://afgtopup.com/partners/
+```
+
+The portal displays:
+
+```text
+SANDBOX  → simulated top-ups only
+LIVE     → real top-ups enabled
+```
+
+## Sandbox behavior
+
+When your account is in **SANDBOX**:
+
+- API authentication works normally.
+- Request validation works normally.
+- Operator and country validation still runs.
+- Current EUR pricing is still calculated.
+- The €50 maximum transaction rule still applies.
+- `external_id` and duplicate protection still apply.
+- No prepaid balance is deducted.
+- No real mobile credit is sent.
+- The request is not submitted for live delivery.
+
+Example sandbox response:
+
+```javascript
+{
+  success: true,
+  sandbox: true,
+  environment: "sandbox",
+  simulated: true,
+  transaction_id: "pr_sbx_5c76fe2d-ea35-4351-b2d7-4a73dde6c603",
+  status: "success",
+  message: "Sandbox top-up simulated successfully. No real mobile credit was sent and no balance was deducted.",
+  eur_charged: 1.93,
+  balance_after: 10.00,
+  balance_unchanged: true,
+  real_topup_sent: false,
+  balance_deducted: false,
+  external_id: "sandbox_order_100001"
+}
+```
+
+A successful sandbox simulation normally returns HTTP `200`.
+
+## Moving to Live
+
+When your integration is ready, contact AFGTopup.
+
+AFGTopup switches the Partner account from **SANDBOX** to **LIVE**.
+
+Before sending a real top-up, confirm the Partner Portal shows the green:
+
+```text
+LIVE
+```
+
+In LIVE mode:
+
+- The accepted EUR charge is deducted from your prepaid balance.
+- The top-up is submitted to the live AFGTopup processing flow.
+- Real mobile credit can be sent to the recipient.
+- The initial accepted status is normally `processing`.
+
+Example live response:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
+  transaction_id: "pr_159e14b7-8dcf-45ba-b30b-451f2966f581",
+  status: "processing",
+  message: "Top-up queued successfully.",
+  eur_charged: 1.93,
+  balance_after: 8.07,
+  external_id: "order_100001"
+}
+```
+
+A successfully accepted live top-up normally returns HTTP `202`.
+
+Recommended onboarding flow:
+
+```text
+Receive API account
+        ↓
+Integrate in SANDBOX
+        ↓
+Test operator detection + pricing + top-up submission
+        ↓
+Confirm sandbox response
+        ↓
+Ask AFGTopup to enable LIVE
+        ↓
+Confirm LIVE badge in Partner Portal
+        ↓
+Run one small controlled real top-up
+        ↓
+Start normal production usage
+```
 
 ---
 
@@ -282,11 +413,34 @@ const result = await sendTopup({
 console.log(result);
 ```
 
-Example response:
+The response depends on your Partner account environment.
+
+Sandbox example:
 
 ```javascript
 {
   success: true,
+  sandbox: true,
+  environment: "sandbox",
+  simulated: true,
+  transaction_id: "pr_sbx_5c76fe2d-ea35-4351-b2d7-4a73dde6c603",
+  status: "success",
+  eur_charged: 1.93,
+  balance_after: 10.00,
+  balance_unchanged: true,
+  real_topup_sent: false,
+  balance_deducted: false,
+  external_id: "order_100001"
+}
+```
+
+Live example:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
   transaction_id: "pr_159e14b7-8dcf-45ba-b30b-451f2966f581",
   status: "processing",
   message: "Top-up queued successfully.",
@@ -302,7 +456,13 @@ Partner transaction IDs generated by AFGTopup start with:
 pr_
 ```
 
-Example:
+Sandbox simulation references use:
+
+```text
+pr_sbx_
+```
+
+Live example:
 
 ```text
 pr_159e14b7-8dcf-45ba-b30b-451f2966f581
@@ -428,9 +588,9 @@ getOperators(country)
 
 # Prepaid Balance
 
-AFGTopup Partner API accounts use a prepaid EUR balance.
+AFGTopup Partner API accounts use a prepaid EUR balance for **LIVE** top-ups.
 
-Before accepting a top-up, AFGTopup:
+In LIVE mode, before accepting a top-up, AFGTopup:
 
 ```text
 Authenticates API key
@@ -444,7 +604,9 @@ Safely deducts EUR cost
 Queues top-up for processing
 ```
 
-If your balance is insufficient, the API returns HTTP `402`.
+In SANDBOX mode, the current EUR price is still calculated, but the prepaid balance is **not deducted** and no real top-up is sent.
+
+If your LIVE balance is insufficient, the API returns HTTP `402`.
 
 Example:
 
@@ -608,6 +770,8 @@ async function createTopup() {
     externalId
   });
 
+  console.log('Environment:', result.environment);
+  console.log('Sandbox:', result.sandbox === true);
   console.log('Transaction:', result.transaction_id);
   console.log('Status:', result.status);
   console.log('EUR charged:', result.eur_charged);
@@ -688,21 +852,23 @@ This makes support, retries, and reconciliation easier.
 # Important Production Rules
 
 1. Keep the API key backend-only.
-2. Always call the price endpoint before sending.
-3. Use a unique `external_id` for every new top-up.
-4. Store the external ID before sending the request.
-5. Retry the same order using the same external ID.
-6. Store the returned AFGTopup `transaction_id`.
-7. Never assume a timeout means the transaction was not accepted.
-8. Do not hardcode prices.
-9. Handle insufficient balance and rate-limit errors.
-10. Keep your prepaid balance funded.
+2. Integrate and test in SANDBOX before requesting LIVE access.
+3. Confirm the Partner Portal shows `LIVE` before intentionally sending a real top-up.
+4. Always call the price endpoint before sending.
+5. Use a unique `external_id` for every new top-up.
+6. Store the external ID before sending the request.
+7. Retry the same order using the same external ID.
+8. Store the returned AFGTopup `transaction_id`.
+9. Never assume a timeout means the transaction was not accepted.
+10. Do not hardcode prices.
+11. Handle insufficient balance and rate-limit errors.
+12. Keep your prepaid balance funded for LIVE usage.
 
 ---
 
 # Initial Transaction Status
 
-A successful top-up submission initially returns:
+In **LIVE** mode, a successful accepted top-up normally returns:
 
 ```text
 status: processing
@@ -710,7 +876,17 @@ status: processing
 
 The request has been accepted and queued for processing.
 
-Do not promise an exact delivery time based only on the initial API response.
+In **SANDBOX** mode, a successful simulation returns:
+
+```text
+status: success
+sandbox: true
+simulated: true
+```
+
+This sandbox status confirms that the simulated API flow succeeded. It does **not** mean real mobile credit was sent.
+
+Do not promise an exact delivery time based only on the initial LIVE API response.
 
 ---
 
@@ -721,6 +897,7 @@ Contact AFGTopup for:
 - Prepaid balance top-ups
 - API account questions
 - API key rotation
+- Sandbox / Live environment activation
 - Technical integration assistance
 - Transaction investigation
 - Higher limits when approved
@@ -739,10 +916,14 @@ Before production use:
 
 - [ ] API key stored only on backend
 - [ ] `.env` excluded from Git
+- [ ] Partner Portal environment checked
 - [ ] `getOperators()` tested
 - [ ] `detectOperator()` tested
 - [ ] `getPrice()` tested
-- [ ] Small real top-up tested
+- [ ] Sandbox top-up tested and response confirms `sandbox: true`
+- [ ] AFGTopup has enabled LIVE access
+- [ ] Partner Portal shows the green `LIVE` badge
+- [ ] One small controlled real top-up tested
 - [ ] Unique `external_id` stored for every new order
 - [ ] Safe same-ID retry logic implemented
 - [ ] AFGTopup `transaction_id` stored
