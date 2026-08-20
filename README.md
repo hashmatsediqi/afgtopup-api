@@ -3,7 +3,7 @@
 
 Node.js is provided as a reference implementation; the AFGTopup Partner API can be integrated from any backend technology capable of making HTTPS requests and handling JSON. Regardless of language, the same rules apply: keep the API key server-side only, use HTTPS, and generate a unique `external_id` per order.
 
-Plug-and-play Node.js integration for the AFGTopup Partner API.
+A reference Node.js client for the AFGTopup Partner API — the API itself works with any backend that can make HTTPS requests.
 
 Send mobile airtime top-ups to supported countries using a secure prepaid API account.
 
