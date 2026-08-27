@@ -22,7 +22,7 @@ Currently supported countries:
 
 | File | Purpose |
 |------|---------|
-| `afgtopup-client.js` | API client covering all 4 endpoints |
+| `afgtopup-client.js` | Reference API client for operator, detection, pricing and top-up submission |
 | `example.js` | Complete integration example |
 | `.env.example` | Environment variable template |
 | `README.md` | Integration documentation |
@@ -119,7 +119,9 @@ Send top-up
         ↓
 Receive AFGTopup transaction_id
         ↓
-LIVE: initial status = processing
+Check transaction status
+        ↓
+LIVE: processing until a final success/failed status is available
 SANDBOX: simulated status = success
 ```
 
@@ -291,6 +293,7 @@ Start normal production usage
 | Detect operator | GET | `/partner-detect` |
 | Get price | GET | `/partner-price` |
 | Send top-up | POST | `/partner-topup` |
+| Check transaction status | GET | `/partner-api-status` |
 
 ---
 
@@ -480,6 +483,126 @@ Store the returned `transaction_id` with your own order records.
 
 ---
 
+# Step 5 — Check Transaction Status
+
+Use the transaction-status endpoint to check the current status of a top-up.
+
+```http
+GET /partner-api-status?transaction_id=pr_example_123
+X-API-Key: your_private_api_key
+```
+
+Full endpoint:
+
+```text
+https://afgtopup.com/.netlify/functions/partner-api-status
+```
+
+For LIVE transactions, you may query by either `transaction_id` or `external_id`.
+
+Example with your own order reference:
+
+```http
+GET /partner-api-status?external_id=order_100001
+X-API-Key: your_private_api_key
+```
+
+For SANDBOX status checks, use `external_id`:
+
+```http
+GET /partner-api-status?external_id=sandbox_order_100001
+X-API-Key: your_private_api_key
+```
+
+## LIVE status responses
+
+While the transaction is not final:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
+  transaction_id: "pr_example_123",
+  external_id: "order_100001",
+  status: "processing",
+  final: false
+}
+```
+
+When successful:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
+  transaction_id: "pr_example_123",
+  external_id: "order_100001",
+  status: "success",
+  final: true
+}
+```
+
+When failed:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
+  transaction_id: "pr_example_123",
+  external_id: "order_100001",
+  status: "failed",
+  final: true
+}
+```
+
+Interpret the response as follows:
+
+```text
+processing + final:false → keep pending and check again
+success    + final:true  → mark successful and stop polling
+failed     + final:true  → mark failed and stop polling
+```
+
+The status endpoint reads the current stored AFGTopup transaction status. If a transaction is later updated from `PENDING` to `SUCCESS` or `FAILED`, the next status request returns the new current status.
+
+## SANDBOX status response
+
+```javascript
+{
+  success: true,
+  sandbox: true,
+  environment: "sandbox",
+  simulated: true,
+  transaction_id: "pr_sbx_example_123",
+  external_id: "sandbox_order_100001",
+  status: "success",
+  final: true,
+  real_topup_sent: false,
+  balance_deducted: false
+}
+```
+
+A sandbox `success` confirms only that the simulated API flow completed. It does not mean real mobile credit was sent.
+
+## Recommended polling
+
+After a LIVE top-up is accepted with `status: "processing"`:
+
+1. Keep the customer order pending.
+2. Call `/partner-api-status` after a short delay.
+3. If the response is `processing` with `final: false`, wait and check again.
+4. Stop polling only when `final: true`.
+5. Do not create a new `external_id` just because a status remains pending.
+
+Use reasonable retry/backoff behavior and respect API rate limits.
+
+If the status endpoint returns HTTP `404`, verify the transaction reference and make sure it belongs to the authenticated Partner API account.
+
+---
+
 # external_id — Very Important
 
 `externalId` is required for every top-up.
@@ -664,6 +787,7 @@ Your application should use retry/backoff when receiving a `429` response.
 | `401` | Invalid/missing API key | Check `AFGTOPUP_API_KEY` |
 | `402` | Insufficient balance | Add prepaid partner balance |
 | `403` | Account inactive/suspended | Contact AFGTopup |
+| `404` | Transaction not found / not available to this Partner account | Verify transaction reference and ownership |
 | `409` | Same order already processing or held | Do not create a new external ID |
 | `422` | Operator detection failed / validation issue | Allow manual operator selection |
 | `429` | Rate limit reached | Retry with backoff |
@@ -688,6 +812,16 @@ and that your server has loaded the environment variable.
 Your account does not have enough prepaid balance.
 
 Do not repeatedly retry until sufficient balance has been added.
+
+---
+
+# Handling 404
+
+For `/partner-api-status`, a `404` means the requested transaction could not be found for the authenticated Partner API account.
+
+Verify the `transaction_id` or `external_id` and make sure it belongs to the same Partner API account.
+
+Do not treat `404` as proof that a new top-up should be created.
 
 ---
 
@@ -868,10 +1002,13 @@ This makes support, retries, and reconciliation easier.
 7. Store the external ID before sending the request.
 8. Retry the same order using the same external ID.
 9. Store the returned AFGTopup `transaction_id`.
-10. Never assume a timeout means the transaction was not accepted.
-11. Do not hardcode prices.
-12. Handle insufficient balance and rate-limit errors.
-13. Keep your prepaid balance funded for LIVE usage.
+10. Poll `/partner-api-status` while a LIVE transaction is `processing`.
+11. Treat `final: false` as pending, not as success or failure.
+12. Stop polling when `final: true`.
+13. Never assume a timeout means the transaction was not accepted.
+14. Do not hardcode prices.
+15. Handle insufficient balance and rate-limit errors.
+16. Keep your prepaid balance funded for LIVE usage.
 
 ---
 
@@ -884,6 +1021,29 @@ status: processing
 ```
 
 The request has been accepted and queued for processing.
+
+After a LIVE `processing` response, use `/partner-api-status` to check the current status.
+
+Keep the order pending while the status endpoint returns:
+
+```text
+status: processing
+final: false
+```
+
+A final result is:
+
+```text
+status: success
+final: true
+```
+
+or:
+
+```text
+status: failed
+final: true
+```
 
 In **SANDBOX** mode, a successful simulation returns:
 
@@ -939,6 +1099,9 @@ Before production use:
 - [ ] Unique `external_id` stored for every new order
 - [ ] Safe same-ID retry logic implemented
 - [ ] AFGTopup `transaction_id` stored
+- [ ] `/partner-api-status` integrated on the backend
+- [ ] `processing` + `final: false` kept pending and polled again
+- [ ] `success` / `failed` with `final: true` handled correctly
 - [ ] HTTP 401 handled
 - [ ] HTTP 402 handled
 - [ ] HTTP 409 handled
