@@ -8,6 +8,7 @@
 //   2. Auto-detect operator
 //   3. Get real-time EUR price
 //   4. Send top-up
+//   5. Check transaction status
 //
 // Run directly:
 //   node example.js
@@ -23,8 +24,18 @@ const {
   getOperators,
   detectOperator,
   getPrice,
-  sendTopup
+  sendTopup,
+  checkTransactionStatus
 } = require('./afgtopup-client');
+
+
+// -----------------------------------------------------------------------------
+// HELPER: wait before polling status again
+// -----------------------------------------------------------------------------
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 
 // -----------------------------------------------------------------------------
@@ -279,9 +290,145 @@ async function runExample() {
 
 
     console.log('');
-    console.log(
-      'The transaction has been accepted and is being processed.'
-    );
+
+    if (result.sandbox === true) {
+      console.log(
+        'Sandbox simulation completed. No real mobile credit was sent and no balance was deducted.'
+      );
+    } else {
+      console.log(
+        'The LIVE transaction has been accepted and is being processed.'
+      );
+    }
+
+
+    // =========================================================================
+    // STEP 5: Check Transaction Status
+    // =========================================================================
+    //
+    // SANDBOX:
+    //   Check by external_id. A completed simulation should return final:true.
+    //
+    // LIVE:
+    //   Poll by transaction_id until final:true.
+    //
+    // IMPORTANT:
+    //   processing + final:false = keep pending and check again
+    //   success    + final:true  = final success
+    //   failed     + final:true  = final failure
+    //
+    // This status check is READ-ONLY. It does not send another top-up.
+    // =========================================================================
+
+    console.log('');
+    console.log('STEP 5: Checking transaction status...');
+
+    try {
+
+      if (result.sandbox === true) {
+
+        const statusResult = await checkTransactionStatus({
+          externalId: result.external_id || myOrderId
+        });
+
+        console.log(
+          `✅ Sandbox status: ${statusResult.status} (final: ${statusResult.final})`
+        );
+
+        console.log(
+          `   Real top-up sent: ${statusResult.real_topup_sent === true}`
+        );
+
+        console.log(
+          `   Balance deducted: ${statusResult.balance_deducted === true}`
+        );
+
+      } else {
+
+        // Demo polling policy:
+        // check up to 6 times, waiting 10 seconds between non-final responses.
+        // In production, use your own background job/queue and retry/backoff policy.
+        const maxChecks = 6;
+        const waitMs = 10000;
+
+        let finalStatus = null;
+
+        for (let attempt = 1; attempt <= maxChecks; attempt += 1) {
+
+          if (attempt > 1) {
+            await sleep(waitMs);
+          }
+
+          const statusResult = await checkTransactionStatus({
+            transactionId: result.transaction_id
+          });
+
+          console.log(
+            `   Status check ${attempt}/${maxChecks}: ${statusResult.status} (final: ${statusResult.final})`
+          );
+
+          if (statusResult.final === true) {
+            finalStatus = statusResult;
+            break;
+          }
+        }
+
+        if (finalStatus) {
+
+          if (finalStatus.status === 'success') {
+            console.log('✅ Final status: SUCCESS');
+          } else if (finalStatus.status === 'failed') {
+            console.log('❌ Final status: FAILED');
+          } else {
+            console.log(
+              `ℹ️ Final response received: ${finalStatus.status}`
+            );
+          }
+
+        } else {
+          console.log(
+            '⏳ Transaction is still processing. Keep it pending and poll again later.'
+          );
+        }
+      }
+
+    } catch (statusErr) {
+
+      console.error('');
+      console.error(
+        '⚠️ Could not read transaction status:',
+        statusErr.message
+      );
+
+      if (statusErr.status === 404) {
+        console.error(
+          '   Verify that the transaction reference belongs to this Partner API account.'
+        );
+      }
+
+      if (statusErr.status === 429) {
+        console.error(
+          '   Rate limit reached. Retry the status check with backoff.'
+        );
+      }
+
+      if (statusErr.status === 503) {
+        console.error(
+          '   Status is temporarily unavailable. Keep the order pending and retry later.'
+        );
+      }
+
+      if (statusErr.details) {
+        console.error(
+          '   Details:',
+          statusErr.details
+        );
+      }
+
+      console.error(
+        '   Do not create a new external_id just because a status lookup failed.'
+      );
+    }
 
 
   } catch (err) {
