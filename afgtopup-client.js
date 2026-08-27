@@ -8,6 +8,7 @@
 //   2. Detect operator
 //   3. Get real-time price
 //   4. Send top-up
+//   5. Check transaction status
 //
 // SETUP:
 //   1. Use Node.js v18+
@@ -468,6 +469,94 @@ async function sendTopup({
 
 
 // =============================================================================
+// ENDPOINT 5: Check Transaction Status
+// =============================================================================
+//
+// Reads the current status of a Partner API top-up.
+//
+// LIVE:
+//   You can query by AFGTopup transaction_id OR by your external_id.
+//
+// SANDBOX:
+//   Query by external_id.
+//
+// IMPORTANT:
+//   - "processing" + final:false means keep the order pending and check again.
+//   - "success" + final:true means the transaction is final and successful.
+//   - "failed" + final:true means the transaction is final and failed.
+//   - This is a READ-ONLY request. It does not send a top-up or deduct balance.
+//
+// @param {Object} options
+// @param {string} [options.transactionId]
+// AFGTopup transaction reference returned by sendTopup(), e.g. "pr_...".
+//
+// @param {string} [options.externalId]
+// Your own order/reference ID used when the top-up was submitted.
+//
+// Example LIVE response:
+//
+// {
+//   success: true,
+//   sandbox: false,
+//   environment: "live",
+//   transaction_id: "pr_example_123",
+//   external_id: "order_100001",
+//   status: "processing",
+//   final: false
+// }
+//
+// Example SANDBOX response:
+//
+// {
+//   success: true,
+//   sandbox: true,
+//   environment: "sandbox",
+//   simulated: true,
+//   transaction_id: "pr_sbx_example_123",
+//   external_id: "sandbox_order_100001",
+//   status: "success",
+//   final: true,
+//   real_topup_sent: false,
+//   balance_deducted: false
+// }
+//
+// =============================================================================
+
+async function checkTransactionStatus({
+  transactionId,
+  externalId
+} = {}) {
+
+  if (!transactionId && !externalId) {
+    throw new Error(
+      'transactionId or externalId is required'
+    );
+  }
+
+  if (
+    transactionId &&
+    !/^pr_[A-Za-z0-9_-]{8,120}$/.test(String(transactionId))
+  ) {
+    throw new Error('transactionId format is invalid');
+  }
+
+  if (
+    externalId &&
+    (typeof externalId !== 'string' ||
+      externalId.length < 1 ||
+      externalId.length > 128)
+  ) {
+    throw new Error('externalId must be 1–128 characters');
+  }
+
+  return apiGet('partner-api-status', {
+    transaction_id: transactionId || undefined,
+    external_id: externalId || undefined
+  });
+}
+
+
+// =============================================================================
 // EXPORTS
 // =============================================================================
 
@@ -475,5 +564,6 @@ module.exports = {
   getOperators,
   detectOperator,
   getPrice,
-  sendTopup
+  sendTopup,
+  checkTransactionStatus
 };
