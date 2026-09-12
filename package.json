@@ -1,10 +1,12 @@
 {
   "name": "afgtopup-integration",
-  "version": "1.0.0",
-  "description": "AFGTopup API integration starter kit",
+  "version": "1.1.0",
+  "description": "AFGTopup airtime and data bundle Partner API integration starter kit",
   "main": "afgtopup-client.js",
   "scripts": {
-    "test": "node example.js"
+    "test": "node example.js",
+    "example:airtime": "node example.js",
+    "example:data": "node example-data-bundle.js"
   },
   "dependencies": {
     "dotenv": "^16.0.0"

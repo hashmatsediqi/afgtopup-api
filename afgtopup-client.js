@@ -8,7 +8,10 @@
 //   2. Detect operator
 //   3. Get real-time price
 //   4. Send top-up
-//   5. Check transaction status
+//   5. Check airtime transaction status
+//   6. List data bundles
+//   7. Send data bundle
+//   8. Check data bundle transaction status
 //
 // SETUP:
 //   1. Use Node.js v18+
@@ -557,6 +560,165 @@ async function checkTransactionStatus({
 
 
 // =============================================================================
+// DATA BUNDLES: List Available Bundles
+// =============================================================================
+//
+// Returns the currently available data bundles for an Afghanistan mobile number.
+// The mobile operator is identified automatically from the phone number.
+//
+// Always display/use the returned bundle_id and eur_cost from this response.
+// Do not hardcode bundle prices because availability and pricing can change.
+//
+// @param {string} phone
+// Recipient phone number in international E.164 format.
+// Example: "+93700123456"
+//
+// Example response:
+// {
+//   success: true,
+//   environment: "live",
+//   country: "AF",
+//   operator: {
+//     id: "1871",
+//     name: "Afghan Wireless Afghanistan"
+//   },
+//   bundles: [
+//     {
+//       bundle_id: "58884",
+//       name: "1.2 GB 7 Days",
+//       data_amount: "1.2GB",
+//       validity: "7 days",
+//       destination_amount: 132,
+//       eur_cost: 2.34,
+//       currency: "EUR"
+//     }
+//   ]
+// }
+// =============================================================================
+
+async function getDataBundles(phone) {
+  if (!phone) {
+    throw new Error('phone is required');
+  }
+
+  if (!/^\+[1-9]\d{6,14}$/.test(phone)) {
+    throw new Error(
+      'phone must be in international E.164 format, e.g. +93700600153'
+    );
+  }
+
+  if (!phone.startsWith('+93')) {
+    throw new Error(
+      'Data bundles are currently available for Afghanistan numbers only'
+    );
+  }
+
+  return apiGet('partner-data-bundles', { phone });
+}
+
+
+// =============================================================================
+// DATA BUNDLES: Send Bundle
+// =============================================================================
+//
+// Submits one data bundle order.
+//
+// IMPORTANT external_id rule:
+//   - Use a new externalId for every NEW customer order.
+//   - Store it before sending the request.
+//   - If retrying the SAME order, reuse the SAME externalId.
+//   - Do not generate a new externalId because of a timeout or pending status.
+//
+// @param {Object} options
+// @param {string} options.phone
+// @param {string|number} options.bundleId
+// @param {string} options.externalId
+// @param {string} [options.email]
+// =============================================================================
+
+async function sendDataBundle({
+  phone,
+  bundleId,
+  externalId,
+  email
+}) {
+  if (!phone) {
+    throw new Error('phone is required');
+  }
+
+  if (!/^\+[1-9]\d{6,14}$/.test(phone)) {
+    throw new Error(
+      'phone must be in international E.164 format, e.g. +93700600153'
+    );
+  }
+
+  if (!phone.startsWith('+93')) {
+    throw new Error(
+      'Data bundles are currently available for Afghanistan numbers only'
+    );
+  }
+
+  const bundleIdString = String(bundleId ?? '').trim();
+  if (!/^\d+$/.test(bundleIdString)) {
+    throw new Error('bundleId is required and must be a numeric bundle ID');
+  }
+
+  if (!externalId || typeof externalId !== 'string') {
+    throw new Error(
+      'externalId is required — use your unique internal order ID'
+    );
+  }
+
+  if (externalId.length > 128) {
+    throw new Error('externalId must be 128 characters or fewer');
+  }
+
+  if (
+    email &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))
+  ) {
+    throw new Error('email format is invalid');
+  }
+
+  return apiPost('partner-data-bundle-topup', {
+    phone,
+    bundle_id: bundleIdString,
+    external_id: externalId,
+    customer_email: email || null
+  });
+}
+
+
+// =============================================================================
+// DATA BUNDLES: Check Transaction Status
+// =============================================================================
+//
+// Reads the current status of a LIVE data bundle transaction.
+//
+// Interpret the public status using these fields:
+//   processing + final:false = keep pending and check again
+//   success    + final:true  = final success
+//   failed     + final:true  = final failure
+//
+// This is READ-ONLY. It does not send another bundle or deduct balance.
+// =============================================================================
+
+async function checkDataBundleStatus({ transactionId } = {}) {
+  if (!transactionId) {
+    throw new Error('transactionId is required');
+  }
+
+  if (!/^pdb_[A-Za-z0-9_-]{8,120}$/.test(String(transactionId))) {
+    throw new Error('transactionId format is invalid');
+  }
+
+  return apiGet('partner-data-bundle-status', {
+    transaction_id: transactionId
+  });
+}
+
+
+// =============================================================================
 // EXPORTS
 // =============================================================================
 
@@ -565,5 +727,8 @@ module.exports = {
   detectOperator,
   getPrice,
   sendTopup,
-  checkTransactionStatus
+  checkTransactionStatus,
+  getDataBundles,
+  sendDataBundle,
+  checkDataBundleStatus
 };

@@ -5,9 +5,9 @@ Node.js is provided as a reference implementation; the AFGTopup Partner API can 
 
 A reference Node.js client for the AFGTopup Partner API — the API itself works with any backend that can make HTTPS requests.
 
-Send mobile airtime top-ups to supported countries using a secure prepaid API account.
+Send mobile airtime top-ups and supported data bundles using one secure prepaid Partner API account.
 
-Currently supported countries:
+**Airtime** is currently supported for:
 
 - Afghanistan
 - Pakistan
@@ -16,14 +16,17 @@ Currently supported countries:
 - Nigeria
 - Kenya
 
+**Data bundles** are currently available for Afghanistan mobile numbers.
+
 ---
 
 # What's in this kit
 
 | File | Purpose |
 |------|---------|
-| `afgtopup-client.js` | Reference API client for operator, detection, pricing and top-up submission |
-| `example.js` | Complete integration example |
+| `afgtopup-client.js` | Reference API client for airtime and data-bundle endpoints |
+| `example.js` | Complete airtime integration example |
+| `example-data-bundle.js` | Data-bundle catalogue, submission and status example |
 | `.env.example` | Environment variable template |
 | `README.md` | Integration documentation |
 
@@ -66,25 +69,19 @@ AFGTopup may rotate your credential before LIVE activation. When that happens, r
 
 ## 3. Test the integration
 
-Before running the example, open:
-
-```text
-example.js
-```
-
-and replace the example phone number with a phone number you are authorized to use for testing.
-
-Then run:
+For the airtime example, open `example.js`, replace the example phone number with a number you are authorized to use for testing, then run:
 
 ```bash
-node example.js
+npm run example:airtime
 ```
 
-or:
+For the data-bundle example, open `example-data-bundle.js`, replace the example phone number, then run:
 
 ```bash
-npm test
+npm run example:data
 ```
+
+The data-bundle example is safe by default: it fetches and displays the bundle catalogue but does not submit a bundle unless you intentionally set `AFGTOPUP_RUN_DATA_EXAMPLE=true`.
 
 Before Step 4, check your Partner Portal:
 
@@ -98,11 +95,11 @@ If the portal shows **LIVE**, Step 4 is a real top-up and can deduct funds from 
 
 ---
 
-# Integration Flow
+# Airtime Integration Flow
 
 Build and test this flow in **SANDBOX** first. After AFGTopup enables **LIVE**, the same integration is used for real top-ups.
 
-The recommended integration flow is:
+The recommended airtime flow is:
 
 ```text
 Customer enters phone number
@@ -125,6 +122,29 @@ LIVE: processing until a final success/failed status is available
 SANDBOX: simulated status = success
 ```
 
+# Data Bundle Integration Flow
+
+For data bundles, the operator and available plans are returned from the phone-number catalogue lookup, so a separate operator-detection step is not required.
+
+```text
+Customer enters Afghanistan phone number
+        ↓
+Get available data bundles + current EUR prices
+        ↓
+Customer selects a bundle
+        ↓
+Complete your own order/payment flow
+        ↓
+Create and store a unique external_id
+        ↓
+Send selected data bundle
+        ↓
+Receive AFGTopup transaction_id
+        ↓
+LIVE: check status until final:true
+SANDBOX: simulated result is returned immediately
+```
+
 ---
 
 # Import the Client
@@ -134,7 +154,11 @@ const {
   getOperators,
   detectOperator,
   getPrice,
-  sendTopup
+  sendTopup,
+  checkTransactionStatus,
+  getDataBundles,
+  sendDataBundle,
+  checkDataBundleStatus
 } = require('./afgtopup-client');
 ```
 
@@ -266,7 +290,7 @@ Receive API account
         ↓
 Integrate in SANDBOX
         ↓
-Test operator detection + pricing + top-up submission
+Test airtime flow + data-bundle flow as enabled for your account
         ↓
 Confirm sandbox response
         ↓
@@ -278,22 +302,25 @@ Update backend environment variable
         ↓
 Confirm LIVE badge in Partner Portal
         ↓
-Run one small controlled real top-up
+Run one small controlled real transaction
         ↓
-Start normal production usage
+Start controlled production usage
 ```
 
 ---
 
 # Available Endpoints
 
-| Function | Method | Endpoint |
-|----------|--------|----------|
-| List operators | GET | `/partner-operators` |
-| Detect operator | GET | `/partner-detect` |
-| Get price | GET | `/partner-price` |
-| Send top-up | POST | `/partner-topup` |
-| Check transaction status | GET | `/partner-api-status` |
+| Service | Function | Method | Endpoint |
+|---------|----------|--------|----------|
+| Airtime | List operators | GET | `/partner-operators` |
+| Airtime | Detect operator | GET | `/partner-detect` |
+| Airtime | Get price | GET | `/partner-price` |
+| Airtime | Send top-up | POST | `/partner-topup` |
+| Airtime | Check transaction status | GET | `/partner-api-status` |
+| Data | Get available bundles for a phone number | GET | `/partner-data-bundles` |
+| Data | Send selected bundle | POST | `/partner-data-bundle-topup` |
+| Data | Check data-bundle transaction status | GET | `/partner-data-bundle-status` |
 
 ---
 
@@ -601,11 +628,259 @@ Use reasonable retry/backoff behavior and respect API rate limits.
 
 If the status endpoint returns HTTP `404`, verify the transaction reference and make sure it belongs to the authenticated Partner API account.
 
+
+---
+
+# Data Bundles — Afghanistan
+
+Data-bundle access uses the same private Partner API key and prepaid EUR balance as airtime. Data-bundle access must be enabled for your Partner account.
+
+Data bundles are currently available for Afghanistan mobile numbers in international E.164 format, for example:
+
+```text
++93700123456
+```
+
+## Data Step 1 — Get Available Bundles
+
+Call the catalogue endpoint with the recipient phone number:
+
+```http
+GET /partner-data-bundles?phone=%2B93700123456
+X-API-Key: your_private_api_key
+```
+
+Node.js client:
+
+```javascript
+const catalogue = await getDataBundles('+93700123456');
+```
+
+Example response:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
+  country: "AF",
+  operator: {
+    id: "1871",
+    name: "Afghan Wireless Afghanistan"
+  },
+  max_eur_per_transaction: 50,
+  bundles: [
+    {
+      bundle_id: "58884",
+      name: "1.2 GB 7 Days",
+      description: "1.2 GB 7 Days",
+      data_amount: "1.2GB",
+      validity: "7 days",
+      destination_amount: 132,
+      eur_cost: 2.34,
+      currency: "EUR"
+    }
+  ]
+}
+```
+
+The API identifies the network automatically and returns only the bundles currently available for that number.
+
+Use the current `bundle_id` and `eur_cost` returned by this endpoint. Do not hardcode bundle IDs, availability or prices.
+
+The example values above are illustrative only.
+
+## Data Step 2 — Send the Selected Bundle
+
+After the customer has selected a bundle and your own order is ready, submit it:
+
+```javascript
+const result = await sendDataBundle({
+  phone: '+93700123456',
+  bundleId: '58884',
+  externalId: 'data_order_100001',
+  email: null
+});
+```
+
+Equivalent request:
+
+```http
+POST /partner-data-bundle-topup
+X-API-Key: your_private_api_key
+Content-Type: application/json
+```
+
+```json
+{
+  "phone": "+93700123456",
+  "bundle_id": "58884",
+  "external_id": "data_order_100001",
+  "customer_email": null
+}
+```
+
+### SANDBOX response
+
+A successful sandbox data-bundle simulation returns a final simulated result. No real bundle is sent and no prepaid balance is deducted.
+
+```javascript
+{
+  success: true,
+  sandbox: true,
+  environment: "sandbox",
+  simulated: true,
+  transaction_id: "pdb_sbx_example_123",
+  external_id: "data_order_100001",
+  status: "success",
+  final: true,
+  bundle: {
+    bundle_id: "58884",
+    name: "1.2 GB 7 Days",
+    data_amount: "1.2GB",
+    validity: "7 days",
+    eur_cost: 2.34,
+    currency: "EUR"
+  },
+  eur_charged: 2.34,
+  balance_after: 10.00,
+  balance_unchanged: true,
+  real_bundle_sent: false,
+  balance_deducted: false
+}
+```
+
+### LIVE response
+
+A successfully accepted live data-bundle request normally returns HTTP `202` and begins as `processing`:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
+  transaction_id: "pdb_example_123",
+  external_id: "data_order_100001",
+  status: "processing",
+  final: false,
+  message: "Data bundle queued successfully.",
+  bundle: {
+    bundle_id: "58884",
+    name: "1.2 GB 7 Days",
+    data_amount: "1.2GB",
+    validity: "7 days",
+    eur_cost: 2.34,
+    currency: "EUR"
+  },
+  eur_charged: 2.34,
+  balance_after: 47.66
+}
+```
+
+Store both your `external_id` and the returned AFGTopup `transaction_id`.
+
+Data-bundle transaction IDs use the `pdb_` prefix. Sandbox simulation references use `pdb_sbx_`.
+
+## Data Step 3 — Check LIVE Status
+
+For a LIVE data-bundle transaction, use the returned `transaction_id`:
+
+```http
+GET /partner-data-bundle-status?transaction_id=pdb_example_123
+X-API-Key: your_private_api_key
+```
+
+Node.js client:
+
+```javascript
+const status = await checkDataBundleStatus({
+  transactionId: result.transaction_id
+});
+```
+
+Interpret the public result using `status` and `final`:
+
+```text
+processing + final:false → keep pending and check again
+success    + final:true  → final success; stop polling
+failed     + final:true  → final failure; stop polling
+```
+
+Example pending response:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
+  transaction_id: "pdb_example_123",
+  external_id: "data_order_100001",
+  status: "processing",
+  final: false
+}
+```
+
+Example final success:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
+  transaction_id: "pdb_example_123",
+  external_id: "data_order_100001",
+  status: "success",
+  final: true
+}
+```
+
+Example final failure:
+
+```javascript
+{
+  success: true,
+  sandbox: false,
+  environment: "live",
+  transaction_id: "pdb_example_123",
+  external_id: "data_order_100001",
+  status: "failed",
+  final: true
+}
+```
+
+If a data-bundle transaction ends as `failed`, do not automatically create a replacement order. Keep the original references and contact AFGTopup if a balance review or transaction investigation is required.
+
+## Data Bundle Safe Retry / Duplicate Protection
+
+The same `external_id` rule applies to data bundles:
+
+```text
+NEW customer order → new external_id
+Retry SAME order   → same external_id
+```
+
+A safe replay can return the existing transaction instead of creating another bundle order:
+
+```javascript
+{
+  success: true,
+  transaction_id: "pdb_example_123",
+  external_id: "data_order_100001",
+  status: "processing",
+  final: false,
+  eur_charged: 2.34,
+  balance_after: 47.66,
+  _replayed: true
+}
+```
+
+If `_replayed: true` is returned, keep using that same transaction. Do not create a new `external_id` for the same customer order.
+
 ---
 
 # external_id — Very Important
 
-`externalId` is required for every top-up.
+`externalId` is required for every airtime or data-bundle submission.
 
 It should be your own unique internal order/reference ID.
 
@@ -615,7 +890,7 @@ Example:
 externalId: 'order_100001'
 ```
 
-Every NEW top-up must use a NEW external ID:
+Every NEW customer order must use a NEW external ID:
 
 ```text
 order_100001
@@ -651,7 +926,7 @@ Retry:
 order_100002
 ```
 
-Changing the external ID can make the retry look like a completely new top-up.
+Changing the external ID can make the retry look like a completely new order.
 
 AFGTopup retains duplicate protection for approximately 14 days.
 
@@ -681,11 +956,13 @@ If:
 result._replayed === true
 ```
 
-the API is returning the existing transaction instead of creating a duplicate top-up.
+the API is returning the existing transaction instead of creating a duplicate order.
 
 ---
 
 # Supported Countries
+
+## Airtime
 
 | Code | Country | Currency |
 |------|---------|----------|
@@ -709,19 +986,27 @@ NG
 KE
 ```
 
-Available operators should be retrieved dynamically using:
+Available airtime operators should be retrieved dynamically using:
 
 ```javascript
 getOperators(country)
+```
+
+## Data Bundles
+
+Data bundles are currently available for Afghanistan numbers (`+93`). Retrieve the available plans dynamically from the phone number:
+
+```javascript
+getDataBundles(phone)
 ```
 
 ---
 
 # Prepaid Balance
 
-AFGTopup Partner API accounts use a prepaid EUR balance for **LIVE** top-ups.
+AFGTopup Partner API accounts use one prepaid EUR balance for **LIVE airtime and data-bundle orders**.
 
-In LIVE mode, before accepting a top-up, AFGTopup:
+In LIVE mode, before accepting an order, AFGTopup:
 
 ```text
 Authenticates API key
@@ -732,10 +1017,10 @@ Checks available prepaid balance
         ↓
 Safely deducts EUR cost
         ↓
-Queues top-up for processing
+Accepts the order for processing
 ```
 
-In SANDBOX mode, the current EUR price is still calculated, but the prepaid balance is **not deducted** and no real top-up is sent.
+In SANDBOX mode, the current EUR price is still returned, but the prepaid balance is **not deducted** and no real airtime or data bundle is sent.
 
 If your LIVE balance is insufficient, the API returns HTTP `402`.
 
@@ -765,17 +1050,13 @@ The API checks the final EUR partner price before accepting the transaction.
 
 ---
 
-# Rate Limit
+# Rate Limits
 
-The current default API limit is:
+Rate limits are applied to protect Partner API availability and may differ by endpoint.
 
-```text
-300 requests per minute per API key
-```
+If a limit is exceeded, the API returns HTTP `429`. When `retry_after_seconds` is included, wait for that period before retrying.
 
-If the limit is exceeded, the API returns HTTP `429`.
-
-Your application should use retry/backoff when receiving a `429` response.
+Your application should use reasonable retry/backoff behavior instead of continuously retrying requests.
 
 ---
 
@@ -786,8 +1067,8 @@ Your application should use retry/backoff when receiving a `429` response.
 | `400` | Invalid request | Check request fields and formats |
 | `401` | Invalid/missing API key | Check `AFGTOPUP_API_KEY` |
 | `402` | Insufficient balance | Add prepaid partner balance |
-| `403` | Account inactive/suspended | Contact AFGTopup |
-| `404` | Transaction not found / not available to this Partner account | Verify transaction reference and ownership |
+| `403` | Account/service access inactive or not enabled | Contact AFGTopup |
+| `404` | Transaction not found / not available to this Partner account | Verify transaction reference and ownership; do not create a replacement automatically |
 | `409` | Same order already processing or held | Do not create a new external ID |
 | `422` | Operator detection failed / validation issue | Allow manual operator selection |
 | `429` | Rate limit reached | Retry with backoff |
@@ -817,7 +1098,7 @@ Do not repeatedly retry until sufficient balance has been added.
 
 # Handling 404
 
-For `/partner-api-status`, a `404` means the requested transaction could not be found for the authenticated Partner API account.
+For `/partner-api-status` or `/partner-data-bundle-status`, a `404` means the requested transaction could not be found for the authenticated Partner API account.
 
 Verify the `transaction_id` or `external_id` and make sure it belongs to the same Partner API account.
 
@@ -923,6 +1204,44 @@ async function createTopup() {
 createTopup();
 ```
 
+## Data Bundle Example
+
+A complete data-bundle example is included in:
+
+```text
+example-data-bundle.js
+```
+
+The core flow is:
+
+```javascript
+const {
+  getDataBundles,
+  sendDataBundle,
+  checkDataBundleStatus
+} = require('./afgtopup-client');
+
+const phone = '+93700123456';
+const catalogue = await getDataBundles(phone);
+const selected = catalogue.bundles[0];
+
+// Complete your own order/payment flow here.
+const externalId = 'data_order_100001';
+
+const result = await sendDataBundle({
+  phone,
+  bundleId: selected.bundle_id,
+  externalId
+});
+
+if (result.sandbox !== true && result.final !== true) {
+  const status = await checkDataBundleStatus({
+    transactionId: result.transaction_id
+  });
+  console.log(status.status, status.final);
+}
+```
+
 ---
 
 # Security
@@ -973,15 +1292,17 @@ If your API key is ever exposed publicly, contact AFGTopup and rotate the key.
 
 # Recommended Order Records
 
-For each top-up, store at least:
+For each airtime or data-bundle order, store at least:
 
 ```text
+Service type (airtime or data_bundle)
 Your external_id
 AFGTopup transaction_id
 Recipient phone number
 Country
-Operator ID
-Local top-up amount
+Operator ID or operator name
+Local airtime amount OR selected bundle_id
+Bundle name/data/validity when applicable
 EUR charged
 Status
 Date/time
@@ -997,18 +1318,20 @@ This makes support, retries, and reconciliation easier.
 2. Integrate and test in SANDBOX before requesting LIVE access.
 3. Replace the sandbox/test credential with the fresh credential provided by AFGTopup before LIVE use.
 4. Confirm the Partner Portal shows `LIVE` before intentionally sending a real top-up.
-5. Always call the price endpoint before sending.
-6. Use a unique `external_id` for every new top-up.
+5. For airtime, call the price endpoint before sending. For data bundles, fetch the current bundle catalogue before sending.
+6. Use a unique `external_id` for every new customer order.
 7. Store the external ID before sending the request.
 8. Retry the same order using the same external ID.
 9. Store the returned AFGTopup `transaction_id`.
-10. Poll `/partner-api-status` while a LIVE transaction is `processing`.
+10. Poll `/partner-api-status` for LIVE airtime and `/partner-data-bundle-status` for LIVE data bundles while a transaction is `processing`.
 11. Treat `final: false` as pending, not as success or failure.
 12. Stop polling when `final: true`.
 13. Never assume a timeout means the transaction was not accepted.
 14. Do not hardcode prices.
 15. Handle insufficient balance and rate-limit errors.
 16. Keep your prepaid balance funded for LIVE usage.
+17. Do not hardcode data-bundle IDs or prices; use the current catalogue response.
+18. If a data-bundle order ends `failed`, keep the original references and contact AFGTopup if a balance review is needed.
 
 ---
 
@@ -1099,7 +1422,12 @@ Before production use:
 - [ ] Unique `external_id` stored for every new order
 - [ ] Safe same-ID retry logic implemented
 - [ ] AFGTopup `transaction_id` stored
-- [ ] `/partner-api-status` integrated on the backend
+- [ ] `/partner-api-status` integrated on the backend for airtime
+- [ ] `getDataBundles()` tested with an authorized Afghanistan number
+- [ ] Data-bundle catalogue displayed using returned `bundle_id` and `eur_cost`
+- [ ] `sendDataBundle()` tested in SANDBOX before intentional LIVE use
+- [ ] `/partner-data-bundle-status` integrated on the backend for LIVE data bundles
+- [ ] Same-`external_id` retry behavior implemented for data bundles
 - [ ] `processing` + `final: false` kept pending and polled again
 - [ ] `success` / `failed` with `final: true` handled correctly
 - [ ] HTTP 401 handled
